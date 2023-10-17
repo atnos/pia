@@ -69,6 +69,7 @@ export class UrlComponent implements OnInit {
           if (response.valid) {
             this.success(serverUrl);
             this.authService.state = response.auth;
+            this.authService.ssoEnabled = response.sso_enabled;
           } else {
             this.errorOnIntrospect();
           }

@@ -5,6 +5,7 @@ import { TranslateService } from '@ngx-translate/core';
 import { Knowledge } from 'src/app/models/knowledge.model';
 import { KnowledgeBase } from 'src/app/models/knowledgeBase.model';
 import { AppDataService } from 'src/app/services/app-data.service';
+import { AuthService } from 'src/app/services/auth.service';
 import { DialogService } from 'src/app/services/dialog.service';
 import { KnowledgeBaseService } from 'src/app/services/knowledge-base.service';
 import { KnowledgesService } from 'src/app/services/knowledges.service';
@@ -56,67 +57,74 @@ export class BaseComponent implements OnInit {
     private knowledgeBaseService: KnowledgeBaseService,
     private appDataService: AppDataService,
     private dialogService: DialogService,
-    private route: ActivatedRoute
-  ) {}
+    private route: ActivatedRoute,
+    private authService: AuthService
+  ) {
+    this.authService.currentUser.subscribe({
+      complete: () => {
+        this.appDataService.entrieMode = 'knowledgeBase';
+        this.base = new KnowledgeBase();
+        const sectionId = parseInt(this.route.snapshot.params.id, 10);
+        if (sectionId) {
+          this.knowledgeBaseService
+            .get(sectionId)
+            .then((base: KnowledgeBase) => {
+              this.base = base;
+              // GET Knowledges entries from selected base
+              this.knowledgesService
+                .getEntries(this.base.id)
+                .then((result: Knowledge[]) => {
+                  this.knowledges = result;
+                });
+            })
+            .catch(() => {});
 
-  async ngOnInit(): Promise<void> {
-    this.appDataService.entrieMode = 'knowledgeBase';
-    this.base = new KnowledgeBase();
-    const sectionId = parseInt(this.route.snapshot.params.id, 10);
-    if (sectionId) {
-      this.knowledgeBaseService
-        .get(sectionId)
-        .then((base: KnowledgeBase) => {
-          this.base = base;
-          // GET Knowledges entries from selected base
-          this.knowledgesService
-            .getEntries(this.base.id)
-            .then((result: Knowledge[]) => {
-              this.knowledges = result;
-            });
-        })
-        .catch(() => {});
+          // Init Form
+          this.entryForm = new FormGroup({
+            name: new FormControl(),
+            category: new FormControl(),
+            description: new FormControl(),
+            lock_version: new FormControl()
+          });
 
-      // Init Form
-      this.entryForm = new FormGroup({
-        name: new FormControl(),
-        category: new FormControl(),
-        description: new FormControl(),
-        lock_version: new FormControl()
-      });
+          // get default categories
+          for (const item of piakb) {
+            if (!this.categories.includes(item.category)) {
+              this.categories.push(item.category);
+            }
+          }
+          // get default filters
+          for (const item of piakb) {
+            if (!this.filters.includes(item.filters) && item.filters !== '') {
+              this.filters.push(item.filters);
+            }
+          }
+          this.data = this.appDataService.dataNav;
+        } else {
+          this.base = new KnowledgeBase(
+            0,
+            this.translateService.instant(
+              'knowledge_base.default_knowledge_base'
+            ),
+            'CNIL',
+            'CNIL'
+          );
+          this.base.is_example = true;
+          this.knowledges = piakb;
 
-      // get default categories
-      for (const item of piakb) {
-        if (!this.categories.includes(item.category)) {
-          this.categories.push(item.category);
+          // Init Form
+          this.entryForm = new FormGroup({
+            name: new FormControl({ disabled: true }),
+            category: new FormControl({ disabled: true }),
+            description: new FormControl({ disabled: true }),
+            lock_version: new FormControl({ disabled: true })
+          });
         }
       }
-      // get default filters
-      for (const item of piakb) {
-        if (!this.filters.includes(item.filters) && item.filters !== '') {
-          this.filters.push(item.filters);
-        }
-      }
-      this.data = this.appDataService.dataNav;
-    } else {
-      this.base = new KnowledgeBase(
-        0,
-        this.translateService.instant('knowledge_base.default_knowledge_base'),
-        'CNIL',
-        'CNIL'
-      );
-      this.base.is_example = true;
-      this.knowledges = piakb;
-
-      // Init Form
-      this.entryForm = new FormGroup({
-        name: new FormControl({ disabled: true }),
-        category: new FormControl({ disabled: true }),
-        description: new FormControl({ disabled: true }),
-        lock_version: new FormControl({ disabled: true })
-      });
-    }
+    });
   }
+
+  async ngOnInit(): Promise<void> {}
 
   checkLockedChoice(): boolean {
     if (
