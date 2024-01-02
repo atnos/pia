@@ -1,5 +1,9 @@
 import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
-import { FormGroup, FormBuilder, Validators } from '@angular/forms';
+import {
+  UntypedFormGroup,
+  UntypedFormBuilder,
+  Validators
+} from '@angular/forms';
 import { AuthService } from 'src/app/services/auth.service';
 
 @Component({
@@ -12,14 +16,14 @@ export class SignInComponent implements OnInit {
   @Output() validated = new EventEmitter<boolean>();
   @Output() forget = new EventEmitter<boolean>();
   loading: boolean = false;
-  logIn: FormGroup;
+  logIn: UntypedFormGroup;
   @Input() fromSignUp: boolean;
   msgFromBack: string;
   ssoEnabled: boolean;
 
   constructor(
-    private formBuilder: FormBuilder,
-    public authService: AuthService
+    private formBuilder: UntypedFormBuilder,
+    private authService: AuthService
   ) {
     // Prepare login form
     this.logIn = this.formBuilder.group({
