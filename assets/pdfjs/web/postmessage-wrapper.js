@@ -1,8 +1,109 @@
 (function() {
   'use strict';
   
-  // 🟢 TEST LOG - Build verification (BUILD_ID from separate file)
   // This will be wrapped in diagnostic logs check after diagnosticLogs is set
+  
+  // #region URL Security Validation
+  let originalFileUrl = null;
+  let urlValidationEnabled = true;
+
+  // Read initial urlValidation flag synchronously from query params
+  try {
+    const __urlParams = new URLSearchParams(window.location.search);
+    const __uv = __urlParams.get('urlValidation');
+    if (__uv !== null) {
+      const lowered = String(__uv).toLowerCase();
+      urlValidationEnabled = !(lowered === '0' || lowered === 'false' || lowered === 'off');
+    }
+  } catch (_) {
+    // ignore
+  }
+  
+  function initializeUrlValidation() {
+    // Get the initial file URL from query parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentFileUrl = urlParams.get('file');
+    const viewerId = urlParams.get('viewerId') || 'default';
+    
+    // Check if we already have a stored original URL for this viewer
+    const storageKey = `ng2-pdfjs-viewer-original-file-url-${viewerId}`;
+    const storedOriginalUrl = sessionStorage.getItem(storageKey);
+    
+    if (storedOriginalUrl) {
+      // Use the stored original URL (from previous page load)
+      originalFileUrl = storedOriginalUrl;
+    } else if (currentFileUrl) {
+      // Store the current URL as the original (first time loading)
+      originalFileUrl = currentFileUrl;
+      sessionStorage.setItem(storageKey, originalFileUrl);
+    }
+  }
+  
+  function validateCurrentUrl() {
+    if (!urlValidationEnabled || !originalFileUrl) {
+      return true; // Skip validation if disabled or no original URL
+    }
+    
+    const currentFileParam = new URLSearchParams(window.location.search).get('file');
+    
+    // Compare the file parameter specifically
+    if (currentFileParam !== originalFileUrl) {
+      console.error('🚨 SECURITY ALERT: File URL has been modified!');
+      console.error('Original:', originalFileUrl);
+      console.error('Current:', currentFileParam);
+      
+      // Prevent loading and show error
+      showSecurityError('Unauthorized file access detected. The file URL has been tampered with.');
+      return false;
+    }
+    
+    return true;
+  }
+  
+  function showSecurityError(message) {
+    // Simple console warning (less intrusive)
+    console.warn('🚨 Security Warning:', message);
+    
+    // Send notification to parent window for Angular template handling
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'ng2-pdfjs-viewer-security-warning',
+        message: message,
+        originalUrl: originalFileUrl,
+        currentUrl: new URLSearchParams(window.location.search).get('file')
+      }, '*');
+    }
+  }
+  
+  // Initialize URL validation on page load
+  initializeUrlValidation();
+  
+  // Add validation check before PDF.js loads
+  window.addEventListener('DOMContentLoaded', () => {
+    if (!validateCurrentUrl()) {
+      // Prevent PDF.js from loading if URL validation fails
+      return;
+    }
+  });
+  
+  // Validate on page load
+  window.addEventListener('load', () => {
+    validateCurrentUrl();
+  });
+  
+  // Also validate on hash change (in case user tries to modify URL)
+  window.addEventListener('hashchange', () => {
+    validateCurrentUrl();
+  });
+  
+  // Validate on popstate (back/forward navigation)
+  window.addEventListener('popstate', () => {
+    validateCurrentUrl();
+  });
+  
+  // Run validation immediately (in case page is already loaded)
+  validateCurrentUrl();
+  // #endregion
   
   // Override the webviewerloaded event to dispatch to parent window
   // This allows us to capture the event outside the iframe and set locale before PDF.js initializes
@@ -77,9 +178,6 @@
   // Set diagnostic logs mode
   function setDiagnosticLogs(enabled) {
     diagnosticLogs = enabled;
-    if (diagnosticLogs) {
-      console.log('🟢 postmessage-wrapper.js: TEST LOG - BUILD_ID:', window.NG2_PDF_VIEWER_BUILD_ID || 'BUILD_ID_NOT_LOADED');
-    }
   }
 
   // Button visibility control helper (consolidated from separate module)
@@ -108,15 +206,8 @@
       return;
     }
     
-    // Use visibility instead of display to preserve toolbar layout
-    if (visible) {
-      el.style.visibility = 'visible';
-      el.style.pointerEvents = 'auto';
-    } else {
-      el.style.visibility = 'hidden';
-      el.style.pointerEvents = 'none'; // Disable interactions when hidden
-    }
-    
+    // Use CSS class instead of inline styles (CSP-safe)
+    el.classList.toggle('ng2-hidden-section', !visible);
   }
   
   // Readiness state management
@@ -143,68 +234,7 @@
     }
   }
   
-  // Inject minimal CSS for density classes without touching core files
-  function ensureDensityStyles() {
-    if (document.getElementById('ng2-density-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'ng2-density-styles';
-    style.textContent = `
-      /* Toolbar positions */
-      body #outerContainer.toolbar-bottom #toolbarContainer { position: absolute; bottom: 0; top: auto; }
-      body #outerContainer.toolbar-bottom #viewerContainer { top: 0; bottom: var(--toolbar-height, 40px); }
-      
-      /* Fix dropdown menus to open upward when toolbar is at bottom */
-      body #outerContainer.toolbar-bottom .doorHangerRight,
-      body #outerContainer.toolbar-bottom .doorHanger {
-        bottom: 100% !important;
-        top: auto !important;
-        transform-origin: bottom center !important;
-      }
-      
-      /* Sidebar right positioning - handle all sidebar states */
-      body #outerContainer.sidebar-right #sidebarContainer { 
-        inset-inline-start: auto; 
-        inset-inline-end: calc(-1 * var(--sidebar-width)); 
-      }
-      body #outerContainer.sidebar-right.sidebarOpen #sidebarContainer { 
-        inset-inline-start: auto; 
-        inset-inline-end: 0; 
-      }
-      body #outerContainer.sidebar-right #sidebarResizer { 
-        inset-inline-start: auto; 
-        inset-inline-end: var(--sidebar-width, 200px); 
-      }
-      body #outerContainer.sidebar-right.sidebarOpen #viewerContainer:not(.pdfPresentationMode) { 
-        inset-inline-start: 0; 
-        inset-inline-end: var(--sidebar-width); 
-      }
-      body #outerContainer.sidebar-right.sidebarOpen #loadingBar { 
-        inset-inline-start: 0; 
-        inset-inline-end: var(--sidebar-width); 
-      }
-      
-      /* Custom responsive breakpoint - override PDF.js defaults when set */
-      @media (max-width: var(--ng2-responsive-breakpoint, 840px)) {
-        #sidebarContainer {
-          background-color: var(--sidebar-narrow-bg-color);
-        }
-        #outerContainer.sidebarOpen #viewerContainer {
-          inset-inline-start: 0 !important;
-        }
-      }
-      
-      #toolbarContainer.density-compact .toolbarButton,
-      #toolbarContainer.density-compact .toolbarField,
-      #toolbarContainer.density-compact select { height: 28px; font-size: 12px; }
-      #toolbarContainer.density-compact #scaleSelect { height: 28px; }
-      #toolbarContainer.density-compact { --toolbar-height: 32px; }
-      #toolbarContainer.density-comfortable .toolbarButton,
-      #toolbarContainer.density-comfortable .toolbarField,
-      #toolbarContainer.density-comfortable select { height: 32px; }
-      #toolbarContainer.density-comfortable { --toolbar-height: 40px; }
-    `;
-    document.head.appendChild(style);
-  }
+  // Note: Density styles now loaded from external ng2-customization.css (CSP-safe)
   
   // Enhanced zoom transformation function
   function transformZoomFromViewer(scale, app) {
@@ -522,6 +552,14 @@
     // Set up error event listeners immediately (before document loads)
     setupErrorEventListeners();
     
+    // Loading state integration for overlay control
+    // MUST be set up early (before document loading begins) to catch documentinit/pagesinit events
+    // Event-driven only; idempotent notifications, no flags or polling
+    app.eventBus.on('documentinit', () => sendStateChangeNotification('loading', true, 'system'));
+    app.eventBus.on('pagesinit', () => sendStateChangeNotification('loading', true, 'system'));
+    app.eventBus.on('pagerendered', () => sendStateChangeNotification('loading', false, 'system'));
+    app.eventBus.on('pagesloaded', () => sendStateChangeNotification('loading', false, 'system'));
+    
     // Listen for document loaded event
     app.eventBus.on('documentloaded', () => {
       setReadiness(ViewerReadiness.DOCUMENT_LOADED);
@@ -570,8 +608,7 @@
     }
     
     try {
-      // Ensure density styles exist before applying related actions
-      ensureDensityStyles();
+      // Note: Density styles loaded from external ng2-customization.css (CSP-safe)
       switch (action) {
         // Button visibility controls (using consolidated helper function)
         case 'show-download':
@@ -607,12 +644,10 @@
           break;
         }
         case 'set-sidebar-width': {
-          const sidebar = document.getElementById('sidebarContainer');
-          if (sidebar && typeof payload === 'string' && payload.trim() !== '') {
-            sidebar.style.width = payload;
-            // Adjust viewer container to respect new sidebar width via CSS variable if available
-            const outer = document.getElementById('outerContainer');
-            if (outer) outer.style.setProperty('--sidebar-width', payload);
+          // Use CSS variable only (CSP-safe) - width applied via ng2-customization.css
+          const outer = document.getElementById('outerContainer');
+          if (outer && typeof payload === 'string' && payload.trim() !== '') {
+            outer.style.setProperty('--sidebar-width', payload);
           }
           break;
         }
@@ -858,11 +893,20 @@
           setBorderRadius(payload);
           break;
         case 'set-custom-css':
-          setCustomCSS(payload);
+          // Handle both old format (string) and new format (object with nonce)
+          if (typeof payload === 'string') {
+            setCustomCSS(payload, null);
+          } else if (payload && typeof payload === 'object') {
+            setCustomCSS(payload.css, payload.nonce);
+          }
           break;
         
         case 'set-diagnostic-logs':
           setDiagnosticLogs(payload);
+          break;
+        case 'set-url-validation':
+          urlValidationEnabled = payload === true;
+          log(`URL validation ${urlValidationEnabled ? 'enabled' : 'disabled'}`);
           break;
         
         default:
@@ -1261,52 +1305,45 @@
   
   // Theme management variables
   let currentTheme = 'light';
-  let appliedStyles = new Set();
   
   function setTheme(theme) {
-    log(`🎨 THEME: setTheme called with: ${theme}`, 'warn');
     currentTheme = theme || 'light';
     
-          // Apply theme-specific CSS classes and variables
-      const body = document.body;
-      if (body) {
-        // Remove ALL theme classes including active states
-        body.classList.remove('ng2-theme-light', 'ng2-theme-dark', 'ng2-theme-auto', 
-                             'ng2-theme-dark-active', 'ng2-theme-light-active');
+    // Apply theme-specific CSS classes (CSP-safe)
+    const body = document.body;
+    if (body) {
+      // Remove ALL theme classes including active states
+      body.classList.remove('ng2-theme-light', 'ng2-theme-dark', 'ng2-theme-auto', 
+                           'ng2-theme-dark-active', 'ng2-theme-light-active');
+      
+      // Add new theme class
+      body.classList.add(`ng2-theme-${currentTheme}`);
+      
+      // Apply auto theme detection
+      if (currentTheme === 'auto') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const activeClass = prefersDark ? 'ng2-theme-dark-active' : 'ng2-theme-light-active';
+        body.classList.add(activeClass);
         
-        // Add new theme class
-        body.classList.add(`ng2-theme-${currentTheme}`);
-        log(`Applied theme class: ng2-theme-${currentTheme}`, 'info');
-        
-        // Apply auto theme detection
-        if (currentTheme === 'auto') {
-          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          const activeClass = prefersDark ? 'ng2-theme-dark-active' : 'ng2-theme-light-active';
-          body.classList.add(activeClass);
-          log(`Auto theme detected: ${activeClass}`, 'info');
-          
-          // Listen for theme changes using local variable instead of global
-          if (!window.ng2ThemeMediaListener) {
-            const mediaListener = window.matchMedia('(prefers-color-scheme: dark)');
-            mediaListener.addListener((e) => {
-              if (currentTheme === 'auto') {
-                body.classList.remove('ng2-theme-dark-active', 'ng2-theme-light-active');
-                const newActiveClass = e.matches ? 'ng2-theme-dark-active' : 'ng2-theme-light-active';
-                body.classList.add(newActiveClass);
-                log(`Auto theme changed: ${newActiveClass}`, 'info');
-              }
-            });
-            // Store reference locally to prevent duplicate listeners
-            window.ng2ThemeMediaListener = mediaListener;
-          }
+        // Listen for theme changes
+        if (!window.ng2ThemeMediaListener) {
+          const mediaListener = window.matchMedia('(prefers-color-scheme: dark)');
+          mediaListener.addListener((e) => {
+            if (currentTheme === 'auto') {
+              body.classList.remove('ng2-theme-dark-active', 'ng2-theme-light-active');
+              const newActiveClass = e.matches ? 'ng2-theme-dark-active' : 'ng2-theme-light-active';
+              body.classList.add(newActiveClass);
+            }
+          });
+          window.ng2ThemeMediaListener = mediaListener;
         }
-        
-        // Force style recalculation
-        body.offsetHeight; // Trigger reflow
       }
+      
+      // Force style recalculation
+      body.offsetHeight; // Trigger reflow
+    }
     
-    // Apply base theme styles
-    applyBaseThemeStyles();
+    // Note: Theme styles now loaded from external ng2-customization.css (CSP-safe)
   }
   
   function setPrimaryColor(color) {
@@ -1345,19 +1382,24 @@
     setCSSVariable('--ng2-border-radius', radius);
   }
   
-  function setCustomCSS(css) {
-    
+  function setCustomCSS(css, nonce) {
     // Remove existing custom CSS
     const existingStyle = document.getElementById('ng2-custom-css');
     if (existingStyle) {
       existingStyle.remove();
     }
     
-    // Apply new custom CSS
+    // Apply new custom CSS with optional nonce for CSP support
     if (css) {
       const style = document.createElement('style');
       style.id = 'ng2-custom-css';
       style.textContent = css;
+      
+      // Add nonce if provided (CSP support)
+      if (nonce) {
+        style.setAttribute('nonce', nonce);
+      }
+      
       document.head.appendChild(style);
     }
   }
@@ -1374,205 +1416,7 @@
     }
   }
   
-  // Apply base theme styles
-  function applyBaseThemeStyles() {
-    log('🎨 THEME: applyBaseThemeStyles called', 'warn');
-    const styleId = 'ng2-base-theme-styles';
-    
-    // Remove existing base styles
-    const existingStyle = document.getElementById(styleId);
-    if (existingStyle) {
-      existingStyle.remove();
-    }
-    
-    // Create base theme styles
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = `
-      /* Base theme styles - Preserve PDF.js defaults */
-      .ng2-theme-light {
-        --ng2-default-bg: #d4d4d7; /* PDF.js original grey background */
-        --ng2-default-text: #000000;
-        --ng2-default-toolbar: #f9f9f9;
-        --ng2-default-border: #cccccc;
-      }
-      
-      .ng2-theme-dark,
-      .ng2-theme-dark-active {
-        --ng2-default-bg: #1e1e1e;
-        --ng2-default-text: #ffffff;
-        --ng2-default-toolbar: #333333;
-        --ng2-default-border: #555555;
-      }
-      
-      .ng2-theme-light-active {
-        --ng2-default-bg: #d4d4d7; /* PDF.js original grey background */
-        --ng2-default-text: #000000;
-        --ng2-default-toolbar: #f9f9f9;
-        --ng2-default-border: #cccccc;
-      }
-      
-      /* Apply theme variables to PDF.js viewer */
-      #viewerContainer {
-        background-color: var(--ng2-background-color, var(--ng2-default-bg)) !important;
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-      }
-      
-      #outerContainer {
-        background-color: var(--ng2-background-color, var(--ng2-default-bg)) !important;
-      }
-      
-      #mainContainer {
-        background-color: var(--ng2-background-color, var(--ng2-default-bg)) !important;
-      }
-      
-      /* Toolbar styling */
-      #toolbarContainer, .toolbar, .findbar, .secondaryToolbar {
-        background-color: var(--ng2-toolbar-color, var(--ng2-default-toolbar)) !important;
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-        border-color: var(--ng2-default-border) !important;
-      }
-      
-      /* PDF page styling - Clean appearance with proper spacing */
-      .page, .pdfViewer .page {
-        background-color: var(--ng2-page-border-color, #ffffff) !important;
-        border-radius: var(--ng2-border-radius, 0) !important;
-        border: var(--page-border) !important;
-        box-shadow: none !important;
-      }
-      
-      /* Canvas within pages */
-      .page canvas {
-        border-radius: var(--ng2-border-radius, 0) !important;
-      }
-      
-      /* Text layer styling */
-      .textLayer {
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-      }
-      
-      /* All toolbar buttons */
-      .toolbarButton, .secondaryToolbarButton, .dropdownToolbarButton > select,
-      .toolbarButton::before, .secondaryToolbarButton::before {
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-        border-radius: var(--ng2-border-radius, 3px) !important;
-      }
-      
-      /* Hover state with primary color */
-      .toolbarButton:hover, .secondaryToolbarButton:hover,
-      .toolbarButton:focus, .secondaryToolbarButton:focus {
-        background-color: var(--ng2-primary-color, rgba(0, 0, 0, 0.1)) !important;
-        color: #ffffff !important;
-      }
-      
-      /* Active/checked state */
-      .toolbarButton.toggled, .secondaryToolbarButton.toggled {
-        background-color: var(--ng2-primary-color, rgba(0, 0, 0, 0.2)) !important;
-        color: #ffffff !important;
-      }
-      
-      /* Split and dropdown buttons */
-      .splitToolbarButton, .splitToolbarButtonSeparator {
-        border-radius: var(--ng2-border-radius, 3px) !important;
-      }
-      
-      .dropdownToolbarButton {
-        border-radius: var(--ng2-border-radius, 3px) !important;
-        background-color: var(--ng2-toolbar-color, var(--ng2-default-toolbar)) !important;
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-      }
-      
-      /* Sidebar styling */
-      #sidebarContainer, #sidebarContent {
-        background-color: var(--ng2-toolbar-color, var(--ng2-default-toolbar)) !important;
-        color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-      }
-      
-      /* Input fields */
-      .toolbarField {
-        background-color: var(--ng2-background-color, #ffffff) !important;
-        color: var(--ng2-text-color, #000000) !important;
-        border-color: var(--ng2-default-border) !important;
-        border-radius: var(--ng2-border-radius, 3px) !important;
-      }
-      
-      /* Dark theme specific overrides */
-      .ng2-theme-dark #viewer, .ng2-theme-dark-active #viewer {
-        background-color: var(--ng2-background-color, #1e1e1e) !important;
-      }
-      
-      .ng2-theme-dark .page, .ng2-theme-dark-active .page {
-        filter: invert(1) hue-rotate(180deg);
-      }
-      
-      .ng2-theme-dark .page canvas, .ng2-theme-dark-active .page canvas {
-        filter: invert(1) hue-rotate(180deg);
-      }
-      
-      /* Force override PDF.js default styles - Preserve original spacing */
-      body {
-        --toolbar-bg-color: var(--ng2-toolbar-color, var(--ng2-default-toolbar)) !important;
-        --body-bg-color: var(--ng2-background-color, var(--ng2-default-bg)) !important;
-        --page-bg-color: var(--ng2-page-border-color, #ffffff) !important;
-        --main-color: var(--ng2-text-color, var(--ng2-default-text)) !important;
-        --field-bg-color: var(--ng2-background-color, #ffffff) !important;
-        --field-color: var(--ng2-text-color, #000000) !important;
-        --button-hover-color: var(--ng2-primary-color, rgba(0, 0, 0, 0.1)) !important;
-        
-        /* Preserve PDF.js original page spacing variables - Invisible borders for spacing */
-        --page-margin: 1px auto -8px !important;
-        --spreadHorizontalWrapped-margin-LR: -3.5px !important;
-        --page-border: 9px solid transparent !important;
-      }
-      
-      /* Additional specificity for stubborn elements */
-      body #outerContainer #mainContainer #viewerContainer {
-        background-color: var(--ng2-background-color, var(--ng2-default-bg)) !important;
-      }
-      
-      /* Ensure clean appearance with proper spacing */
-      .pdfViewer .page {
-        box-shadow: none !important;
-        outline: none !important;
-      }
-      
-      body #toolbarViewer #toolbarContainer {
-        background-color: var(--ng2-toolbar-color, var(--ng2-default-toolbar)) !important;
-      }
-      
-      body .pdfViewer .page {
-        background-color: var(--ng2-page-border-color, #ffffff) !important;
-        border-radius: var(--ng2-border-radius, 0) !important;
-      }
-    `;
-    
-    document.head.appendChild(style);
-    
-    const debugThemeApplication = () => {
-      const testElement = document.querySelector('.page');
-      if (testElement) {
-        const computedStyle = window.getComputedStyle(testElement);
-        log(`🎨 DEBUG: Page background-color: ${computedStyle.backgroundColor}`, 'warn');
-        log(`🎨 DEBUG: Page border-radius: ${computedStyle.borderRadius}`, 'warn');
-      }
-      
-      const toolbar = document.querySelector('#toolbarContainer');
-      if (toolbar) {
-        const computedStyle = window.getComputedStyle(toolbar);
-        log(`🎨 DEBUG: Toolbar background-color: ${computedStyle.backgroundColor}`, 'warn');
-      }
-      
-      // Check CSS variables on root
-      const rootStyle = window.getComputedStyle(document.documentElement);
-      log(`🎨 DEBUG: CSS Var --ng2-primary-color: ${rootStyle.getPropertyValue('--ng2-primary-color')}`, 'warn');
-      log(`🎨 DEBUG: CSS Var --ng2-background-color: ${rootStyle.getPropertyValue('--ng2-background-color')}`, 'warn');
-      log(`🎨 DEBUG: CSS Var --ng2-page-border-color: ${rootStyle.getPropertyValue('--ng2-page-border-color')}`, 'warn');
-      log(`🎨 DEBUG: CSS Var --ng2-border-radius: ${rootStyle.getPropertyValue('--ng2-border-radius')}`, 'warn');
-    };
-    
-    // Execute immediately
-    debugThemeApplication();
-  }
+  // Note: Theme styles now loaded from external ng2-customization.css (CSP-safe)
   
   // #endregion
 
@@ -1950,12 +1794,8 @@
         }
       });
 
-      // Loading state integration for overlay control
-      // Event-driven only; idempotent notifications, no flags or polling
-      app.eventBus.on('documentinit', () => sendStateChangeNotification('loading', true, 'system'));
-      app.eventBus.on('pagesinit', () => sendStateChangeNotification('loading', true, 'system'));
-      app.eventBus.on('pagerendered', () => sendStateChangeNotification('loading', false, 'system'));
-      app.eventBus.on('pagesloaded', () => sendStateChangeNotification('loading', false, 'system'));
+      // Note: Loading state listeners are now set up earlier in setupReadinessEventListeners()
+      // to ensure they catch documentinit/pagesinit events that fire before documentloaded
 
       // New high-value events
       

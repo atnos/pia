@@ -32,9 +32,7 @@ See https://github.com/adobe-type-tools/cmap-resources
 <script src="../build/pdf.mjs" type="module"></script>
 
     <link rel="stylesheet" href="viewer.css">
-    
-    <!-- Load build information (auto-generated) -->
-    <script src="../../build-info.js"></script>
+    <link rel="stylesheet" href="ng2-customization.css">
 
   </head>
 
@@ -705,7 +703,7 @@ See https://github.com/adobe-type-tools/cmap-resources
         </div>
       </dialog>
 
-        <dialog id="printServiceDialog" style="min-width: 200px;">
+        <dialog id="printServiceDialog" class="print-service-dialog">
           <div class="row">
             <span data-l10n-id="pdfjs-print-progress-message"></span>
           </div>
@@ -735,7 +733,7 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
-    <script src="wasm/openjpeg_nowasm_fallback.js"></script>
+    <script src="wasm/openjpeg_nowasm_fallback.js" type="module"></script>
     <script src="viewer.mjs" type="module"></script>
     <script src="postmessage-wrapper.js"></script>
   </body>
